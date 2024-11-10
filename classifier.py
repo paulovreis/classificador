@@ -4,6 +4,7 @@
 # - keras: pip install keras
 # - opencv: pip install opencv-python
 # - scikit-image: pip install scikit-image
+# - pandas: pip install pandas
 
 import os
 import cv2
