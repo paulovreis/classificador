@@ -1,70 +1,108 @@
-#
-# Depends on:
-# - tensorflow: pip install tensorflow
-# - keras: pip install keras
-# - opencv: pip install opencv-python
-# - scikit-image: pip install scikit-image
-# Windows users may need to use "py -m pip install" or "python -m pip install" instead of "pip install".
-
-from tensorflow.keras.applications.resnet50 import ResNet50
-from tensorflow.keras.applications.resnet50 import preprocess_input, decode_predictions
-import numpy as np
+import os
 import cv2
-from skimage.metrics import structural_similarity
+import numpy as np
+from skimage.metrics import structural_similarity as ssim
+from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input, decode_predictions
+import pandas as pd
 
-MODEL = ResNet50(weights='imagenet')
-PATH = "val/n01440764/ILSVRC2012_val_00009111.JPEG"
+# Carregar o modelo ResNet50
+model = ResNet50(weights='imagenet')
 
-def classify(img):
-  try:
-    x = cv2.resize(img, (224,224))
-    x = x[:,:,::-1].astype(np.float32)
-    x = np.expand_dims(x, axis=0)
-    x = preprocess_input(x)
-    preds = MODEL.predict(x)
-    classes = decode_predictions(preds)[0]
-    for c in classes:
-      print("\t%s (%s): %.2f%%"%(c[1], c[0], c[2]*100))
+# Definir o caminho para o dataset Imagenette2
+imagenette_path = "C:/Users/Pichau/Documents/GitHub/classificador/imagenette2"
 
-  except Exception as e:
-    print("Classification failed.")
+# Função para carregar e pré-processar a imagem
+def preprocess_image(img):
+    img = cv2.resize(img, (224, 224))
+    img = img[..., ::-1].astype(np.float32)
+    img = np.expand_dims(img, axis=0)
+    img = preprocess_input(img)
+    return img
 
-def open_img(path):
-  return cv2.imread(path)
+# Função para classificar uma imagem e obter a classe e probabilidade
+def classify_image(img):
+    x = preprocess_image(img)
+    preds = model.predict(x)
+    decoded_preds = decode_predictions(preds, top=1)[0][0]
+    return decoded_preds[1], decoded_preds[2]  # Classe e certeza
 
-def ssim(img1, img2):
-  return structural_similarity(img1, img2, channel_axis=2)*100
+# Função para calcular a similaridade estrutural (SSIM)
+def calculate_ssim(img1, img2):
+    return ssim(img1, img2, multichannel=True) * 100
 
-def jpeg(img, quality):
-  _, x = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-  return cv2.imdecode(x, cv2.IMREAD_COLOR)
+# Distorções definidas
+def distorcao_quadriculado(imagem):
+    for y in range(0, imagem.shape[1], 20):
+        for x in range(0, imagem.shape[0], 20):
+            if (x // 20) % 2 == 0:
+                imagem[x : x + 10, y : y + 10] = (0, 255, 255)  # Amarelo
+            else:
+                imagem[x : x + 10, y : y + 10] = (0, 255, 0)  # Verde
+    return imagem
 
-def resize(img, w, h):
-  orig_h, orig_w = img.shape[:2]
-  x = cv2.resize(img, (w,h))
-  return cv2.resize(x, (orig_w,orig_h))
+def distorcao_alterar_cores(imagem):
+    imagem[:, :, 2] = cv2.add(imagem[:, :, 2], 50)
+    return imagem
 
-def canny(img):
-  x = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-  x = cv2.Canny(x, 100, 200)
-  return cv2.cvtColor(x, cv2.COLOR_GRAY2RGB)
+def distorcao_redimensionamento(imagem):
+    return cv2.resize(imagem, (0, 0), fx=0.5, fy=0.5)
 
-orig_img = open_img(PATH)
+def distorcao_retangulo(imagem):
+    cv2.rectangle(imagem, (10, 10), (imagem.shape[1] - 10, imagem.shape[0] - 10), (0, 0, 255), thickness=8)
+    return imagem
 
-print("Original image:")
-classify(orig_img)
+def distorcao_filtro_gaussiano(imagem):
+    return cv2.GaussianBlur(imagem, (15, 15), 0)
 
-print("After JPEG q=70%:")
-after_jpeg = jpeg(orig_img, 70)
-print("SSIM = %.2f"%(ssim(orig_img, after_jpeg)))
-classify(after_jpeg)
+# Função para processar todas as imagens
+def process_imagenette_dataset():
+    data = []
+    
+    # Percorrer todas as imagens na pasta
+    for root, dirs, files in os.walk(imagenette_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            original_img = cv2.imread(file_path)
 
-print("After resizing to 64x64:")
-after_resize = resize(orig_img, 64, 64)
-print("SSIM = %.2f"%(ssim(orig_img, after_resize)))
-classify(after_resize)
+            # Obter classificação e certeza da imagem original
+            orig_class, orig_confidence = classify_image(original_img)
 
-print("After Canny edge detection:")
-after_canny = canny(orig_img)
-print("SSIM = %.2f"%(ssim(orig_img, after_canny)))
-classify(after_canny)
+            # Aplicar cada distorção, calcular SSIM e nova classificação
+            for dist_name, dist_func in [
+                ("Quadriculado", distorcao_quadriculado),
+                ("Alterar Cores", distorcao_alterar_cores),
+                ("Redimensionamento", distorcao_redimensionamento),
+                ("Retângulo", distorcao_retangulo),
+                ("Filtro Gaussiano", distorcao_filtro_gaussiano),
+            ]:
+                # Copiar a imagem original para aplicar a distorção
+                distorted_img = dist_func(original_img.copy())
+
+                # Calcular SSIM entre original e distorcida
+                similarity = calculate_ssim(original_img, distorted_img)
+
+                # Classificar imagem distorcida
+                dist_class, dist_confidence = classify_image(distorted_img)
+
+                # Verificar mudança de classe
+                class_changed = orig_class != dist_class
+
+                # Registrar dados
+                data.append({
+                    "Image": file,
+                    "Distortion": dist_name,
+                    "Original Class": orig_class,
+                    "Original Confidence": orig_confidence,
+                    "Distorted Class": dist_class,
+                    "Distorted Confidence": dist_confidence,
+                    "Class Changed": class_changed,
+                    "SSIM": similarity,
+                })
+    
+    # Salvar dados em um DataFrame para análise
+    df = pd.DataFrame(data)
+    df.to_csv("imagenette_distorcoes_resultados.csv", index=False)
+    print("Processamento completo. Resultados salvos em 'imagenette_distorcoes_resultados.csv'.")
+
+# Executar o processamento
+process_imagenette_dataset()
