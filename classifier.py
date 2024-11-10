@@ -1,3 +1,10 @@
+#
+# Depends on:
+# - tensorflow: pip install tensorflow
+# - keras: pip install keras
+# - opencv: pip install opencv-python
+# - scikit-image: pip install scikit-image
+
 import os
 import cv2
 import numpy as np
