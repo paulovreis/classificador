@@ -152,7 +152,7 @@ def distorcao_retangulo(imagem):
         (10, 10),
         (imagem.shape[1] - 10, imagem.shape[0] - 10),
         (0, 0, 255),
-        thickness=8,
+        thickness=100,
     )
     return imagem
 
